@@ -137,7 +137,7 @@ const ENGINE = (function(){
       const ord=[0,1,2].sort((p,q)=>ds[p]-ds[q]);
       w.nearest=ord[0];
       // zona administrativa: en la frontera, a veces el taller pertenece a la zona "equivocada"
-      w.zone=(ds[ord[1]]<ds[ord[0]]*1.35 && rnd()<0.45)?ord[1]:ord[0];
+      w.zone=(ds[ord[1]]<ds[ord[0]]*1.55 && rnd()<0.5)?ord[1]:ord[0];
     });
     return ws;
   }
@@ -173,13 +173,12 @@ const ENGINE = (function(){
     const byWs=new Map(orders.map(o=>[o.ws.id,o]));
     const routes=[];
     circuits.forEach(c=>{
-      const step=Math.max(2,Math.floor(c.sector.length/4));
       const pts=[depPt(c.depot)]; const stops=[];
-      c.sector.forEach((w,i)=>{
+      c.sector.forEach(w=>{
         const o=byWs.get(w.id);
         if(o){pts.push({x:w.x,y:w.y,kind:'stop',order:o}); stops.push(o);}
-        else if(i%step===0){pts.push({x:w.x,y:w.y,kind:'via'});}
       });
+      if(!stops.length) return;
       pts.push(depPt(c.depot,'end'));
       routes.push({depot:c.depot, pts, stops, kind:'fixed', km:pathKm(pts)});
     });
@@ -199,6 +198,26 @@ const ENGINE = (function(){
   }
 
   // ---- MODO 2: dinámico sin zonas ----
+  function twoOpt(d,stops){
+    // mejora local de la secuencia (2-opt) con el depósito como inicio y fin
+    const pos=o=>o.ws;
+    const len=seq=>{
+      let s=dist(DEPOTS[d],pos(seq[0]));
+      for(let i=1;i<seq.length;i++) s+=dist(pos(seq[i-1]),pos(seq[i]));
+      return s+dist(pos(seq[seq.length-1]),DEPOTS[d]);
+    };
+    if(stops.length<3) return stops;
+    let best=stops.slice(), bestLen=len(best), improved=true;
+    while(improved){
+      improved=false;
+      for(let i=0;i<best.length-1;i++)for(let j=i+1;j<best.length;j++){
+        const cand=best.slice(0,i).concat(best.slice(i,j+1).reverse(),best.slice(j+1));
+        const l=len(cand);
+        if(l<bestLen-0.01){ best=cand; bestLen=l; improved=true; }
+      }
+    }
+    return best;
+  }
   function orderNN(d,stops){
     const rem=[...stops], seq=[]; let cur=DEPOTS[d];
     while(rem.length){
@@ -221,7 +240,7 @@ const ENGINE = (function(){
           rem.forEach((o,i)=>{const dd=dist(cur,o.ws); if(dd<bd){bd=dd;bi=i;}});
           const o=rem.splice(bi,1)[0]; chunk.push(o); cur=o.ws;
         }
-        routes.push({depot:d, stops:chunk});
+        routes.push({depot:d, stops:twoOpt(d,chunk)});
       }
     }
     return routes;
@@ -244,7 +263,7 @@ const ENGINE = (function(){
           let bd=0,bb=Infinity;
           for(let d=0;d<3;d++){const dd=dist(cen,DEPOTS[d]); if(dd<bb){bb=dd;bd=d;}}
           routes.splice(j,1); routes.splice(i,1);
-          routes.push({depot:bd, stops:orderNN(bd,all)});
+          routes.push({depot:bd, stops:twoOpt(bd,orderNN(bd,all))});
           merged=true; break outer;
         }
       }
@@ -332,7 +351,7 @@ if (typeof module!=='undefined' && module.exports) module.exports=ENGINE;
   const COL={azul:'#16336F', amarillo:'#F5B400', rojo:'#EC1C2D', gris:'#5a6a8a',
              entregado:'#7ee0a0', blanco:'#ffffff', zona:['#3b6fd4','#F5B400','#EC1C2D']};
   const CAPTIONS=[
-    '<b>Rutas fijas (hoy):</b> cada furgoneta recorre su tramo predefinido dentro de su zona, haya los pedidos que haya — incluso talleres frontera que otra delegación tiene más cerca. Los pedidos <b>multi-origen</b> exigen un traspaso previo entre almacenes (furgoneta extra, línea roja).',
+    '<b>Rutas fijas (hoy):</b> cada furgoneta sirve solo los pedidos de su zona y en el orden fijo de su hoja de ruta — aunque el taller de al lado, de otra zona, tenga pedido. Los pedidos <b>multi-origen</b> exigen un traspaso previo entre almacenes (furgoneta extra, línea roja).',
     '<b>Dinámicas, sin zonas:</b> el optimizador asigna cada pedido a la delegación que menos km añade y recalcula la secuencia con los pedidos reales del día. Menos furgonetas y menos km — pero los multi-origen aún requieren traspaso entre almacenes.',
     '<b>Dinámicas + multi-almacén:</b> además, una furgoneta puede <b>recargar en otra delegación</b> si le pilla de camino (◎ pulso) en vez de que salga otra furgoneta, y recoge los pedidos multi-origen en el segundo almacén sin traspaso previo.'
   ];
@@ -375,7 +394,7 @@ if (typeof module!=='undefined' && module.exports) module.exports=ENGINE;
     mode=m; phase='run'; phaseT=0; pulses=[];
     routes=E.build(mode,ws,circuits,orders);
     vans=routes.map((r,i)=>({r, seg:0, t:0, delay:i*0.35, done:false, wait:0,
-                             x:r.pts[0].x, y:r.pts[0].y, trail:[]}));
+                             x:r.pts[0].x, y:r.pts[0].y}));
     document.getElementById('caption').innerHTML=CAPTIONS[m];
     [0,1,2].forEach(i=>document.getElementById('card'+i).classList.toggle('activa',i===m));
   }
@@ -415,16 +434,18 @@ if (typeof module!=='undefined' && module.exports) module.exports=ENGINE;
       const L=Math.max(1,E.dist(a,b));
       v.t+=pxs*dt/L;
       if(v.t>=1){
+        // llegada: la furgoneta se queda EN el punto alcanzado y continúa desde ahí
         v.t=0; v.seg++;
         const p=pts[v.seg];
+        v.x=p.x; v.y=p.y;
         if(p.kind==='stop'&&p.order){ p.order.delivered=true; pulses.push({x:p.x,y:p.y,r:4,max:16,col:COL.entregado}); v.wait=0.3/speedMult; }
         if(p.kind==='reload'){ pulses.push({x:p.x,y:p.y,r:6,max:34,col:COL.amarillo}); v.wait=0.55/speedMult; }
         if(v.seg>=pts.length-1) v.done=true;
+        return;
       }
-      v.x=a.x+(b.x-a.x)*Math.min(1,v.t);
-      v.y=a.y+(b.y-a.y)*Math.min(1,v.t);
+      v.x=a.x+(b.x-a.x)*v.t;
+      v.y=a.y+(b.y-a.y)*v.t;
       if(E.dist(a,b)>2) v.ang=Math.atan2(b.y-a.y,b.x-a.x);
-      v.trail.push({x:v.x,y:v.y}); if(v.trail.length>60)v.trail.shift();
     });
     return allDone;
   }
@@ -457,22 +478,25 @@ if (typeof module!=='undefined' && module.exports) module.exports=ENGINE;
     ctx.fillStyle='#0d1c3e'; ctx.fillRect(0,0,E.W,E.H);
     if(mode===0) ctx.drawImage(zoneCv,0,0);
 
-    // rutas: la de cada furgoneta activa, resaltada; las terminadas quedan tenues
+    // rutas: se pintan según pasa la furgoneta; al terminar quedan tenues
     routes.forEach((r,ri)=>{
-      const v=vans[ri], activa=v&&!v.done&&v.delay<=0;
-      ctx.beginPath();
-      r.pts.forEach((p,i)=> i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
-      if(r.kind==='transfer'){
-        ctx.strokeStyle=activa?COL.rojo:COL.rojo+'44';
-        ctx.setLineDash([7,6]); ctx.lineWidth=activa?2.2:1.4;
-      } else {
-        ctx.strokeStyle=activa?'#a8c0ee':'#4a609655';
-        ctx.setLineDash(mode===0?[5,4]:[]);
-        ctx.lineWidth=activa?2:1;
-      }
-      ctx.stroke(); ctx.setLineDash([]);
-      // marca de parada pendiente sobre la ruta activa
-      if(activa){
+      const v=vans[ri];
+      if(!v) return;
+      const transfer=r.kind==='transfer';
+      if(v.done){
+        ctx.beginPath();
+        r.pts.forEach((p,i)=> i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+        ctx.strokeStyle=(transfer?COL.rojo:'#4a6096')+'44';
+        ctx.setLineDash(transfer?[7,6]:[]); ctx.lineWidth=1; ctx.stroke(); ctx.setLineDash([]);
+      } else if(v.delay<=0){
+        // recorrido ya hecho, hasta la posición actual
+        ctx.beginPath();
+        ctx.moveTo(r.pts[0].x,r.pts[0].y);
+        for(let i=1;i<=Math.min(v.seg,r.pts.length-1);i++) ctx.lineTo(r.pts[i].x,r.pts[i].y);
+        ctx.lineTo(v.x,v.y);
+        ctx.strokeStyle=transfer?COL.rojo:'#a8c0ee';
+        ctx.setLineDash(transfer?[7,6]:[]); ctx.lineWidth=2; ctx.stroke(); ctx.setLineDash([]);
+        // halo sobre los pedidos que le quedan por servir
         r.pts.forEach(p=>{
           if(p.kind==='stop'&&p.order&&!p.order.delivered){
             ctx.beginPath(); ctx.arc(p.x,p.y,9,0,7);
@@ -525,10 +549,6 @@ if (typeof module!=='undefined' && module.exports) module.exports=ENGINE;
     vans.forEach(v=>{
       if(v.done||v.delay>0) return;
       const col=v.r.kind==='transfer'?COL.rojo:COL.blanco;
-      v.trail.forEach((t,i)=>{
-        ctx.beginPath(); ctx.arc(t.x,t.y,1.6,0,7);
-        ctx.fillStyle=col+Math.floor(i/v.trail.length*90+10).toString(16).padStart(2,'0'); ctx.fill();
-      });
       drawVan(v.x,v.y,v.ang||0,col);
     });
 
