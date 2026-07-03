@@ -284,10 +284,36 @@ const ENGINE = (function(){
   }
 
   // ---- MODO 3: dinámico + multi-almacén ----
+  function distSeg(p,a,b){
+    const dx=b.x-a.x, dy=b.y-a.y, L2=dx*dx+dy*dy||1;
+    let t=((p.x-a.x)*dx+(p.y-a.y)*dy)/L2; t=Math.max(0,Math.min(1,t));
+    return Math.hypot(p.x-(a.x+dx*t), p.y-(a.y+dy*t));
+  }
+  function projT(p,a,b){
+    const dx=b.x-a.x, dy=b.y-a.y;
+    return ((p.x-a.x)*dx+(p.y-a.y)*dy)/((dx*dx+dy*dy)||1);
+  }
   function buildMulti(orders){
-    let routes=mergeSmall(dynAssign(orders));
+    const remaining=new Set(orders);
+    let routes=[];
+    // Caso C — corredor entre almacenes: la furgoneta reparte por el camino
+    // y termina en el otro almacén, en vez de ir en vacío
+    for(const [A,B] of [[0,1],[0,2],[1,2]]){
+      const corr=[...remaining].filter(o=>(o.multi===null||o.multi===A)
+        && distSeg(o.ws,DEPOTS[A],DEPOTS[B])<55);
+      if(corr.length>=3){
+        corr.sort((p,q)=>projT(p.ws,DEPOTS[A],DEPOTS[B])-projT(q.ws,DEPOTS[A],DEPOTS[B]));
+        const take=corr.slice(0,CAP);
+        take.forEach(o=>remaining.delete(o));
+        const pts=[depPt(A)];
+        take.forEach(o=>pts.push({x:o.ws.x,y:o.ws.y,kind:'stop',order:o}));
+        pts.push(depPt(B,'end'));
+        routes.push({depot:A, endDepot:B, pts, stops:take, kind:'multi', corridor:true});
+      }
+    }
+    let rest=mergeSmall(dynAssign([...remaining]));
     // Caso B — pedido multi-origen: la furgoneta pasa por el segundo almacén antes de entregar
-    routes.forEach(r=>{
+    rest.forEach(r=>{
       const pts=[depPt(r.depot)];
       const visited=new Set([r.depot]);
       r.stops.forEach(o=>{
@@ -299,12 +325,13 @@ const ENGINE = (function(){
       pts.push(depPt(r.depot,'end'));
       r.pts=pts; r.kind='multi';
     });
+    routes=routes.concat(rest);
     // Caso A — recarga en delegación cercana: encadenar rutas en vez de sacar otra furgoneta
     for(let i=0;i<routes.length;i++){
       for(let j=0;j<routes.length;j++){
         if(i===j) continue;
         const a=routes[i], b=routes[j];
-        if(!a||!b||a.consumed||b.consumed||a.reloaded||a.depot===b.depot) continue;
+        if(!a||!b||a.consumed||b.consumed||a.reloaded||b.corridor||a.depot===b.depot) continue;
         if(b.stops.length<=4 && a.stops.length+b.stops.length<=CAP+4){
           const last=a.stops.length?a.stops[a.stops.length-1].ws:DEPOTS[a.depot];
           if(dist(last,DEPOTS[b.depot])<210){
@@ -317,7 +344,7 @@ const ENGINE = (function(){
               pts.push({x:o.ws.x,y:o.ws.y,kind:'stop',order:o});
             });
             pts.push(depPt(b.depot,'end'));
-            a.pts=pts; a.stops=[...a.stops,...b.stops]; a.reloaded=true; b.consumed=true;
+            a.pts=pts; a.stops=[...a.stops,...b.stops]; a.reloaded=true; a.endDepot=b.depot; b.consumed=true;
           }
         }
       }
@@ -353,7 +380,7 @@ if (typeof module!=='undefined' && module.exports) module.exports=ENGINE;
   const CAPTIONS=[
     '<b>Rutas fijas (hoy):</b> cada furgoneta sirve solo los pedidos de su zona y en el orden fijo de su hoja de ruta — aunque el taller de al lado, de otra zona, tenga pedido. Los pedidos <b>multi-origen</b> exigen un traspaso previo entre almacenes (furgoneta extra, línea roja).',
     '<b>Dinámicas, sin zonas:</b> el optimizador asigna cada pedido a la delegación que menos km añade y recalcula la secuencia con los pedidos reales del día. Menos furgonetas y menos km — pero los multi-origen aún requieren traspaso entre almacenes.',
-    '<b>Dinámicas + multi-almacén:</b> además, una furgoneta puede <b>recargar en otra delegación</b> si le pilla de camino (◎ pulso) en vez de que salga otra furgoneta, y recoge los pedidos multi-origen en el segundo almacén sin traspaso previo.'
+    '<b>Dinámicas + multi-almacén:</b> una furgoneta puede <b>recargar en otra delegación</b> si le pilla de camino (◎ pulso), recoge los multi-origen en el segundo almacén sin traspaso, y los trayectos entre almacenes se aprovechan <b>repartiendo por el camino</b> en vez de ir en vacío.'
   ];
   const NOMBRES=['Rutas fijas','Dinámicas sin zonas','Dinámicas + multi-almacén'];
 
