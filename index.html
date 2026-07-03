@@ -173,7 +173,7 @@ const ENGINE = (function(){
     const byWs=new Map(orders.map(o=>[o.ws.id,o]));
     const routes=[];
     circuits.forEach(c=>{
-      const step=Math.max(1,Math.floor(c.sector.length/7));
+      const step=Math.max(2,Math.floor(c.sector.length/4));
       const pts=[depPt(c.depot)]; const stops=[];
       c.sector.forEach((w,i)=>{
         const o=byWs.get(w.id);
@@ -424,7 +424,7 @@ if (typeof module!=='undefined' && module.exports) module.exports=ENGINE;
       v.x=a.x+(b.x-a.x)*Math.min(1,v.t);
       v.y=a.y+(b.y-a.y)*Math.min(1,v.t);
       if(E.dist(a,b)>2) v.ang=Math.atan2(b.y-a.y,b.x-a.x);
-      v.trail.push({x:v.x,y:v.y}); if(v.trail.length>26)v.trail.shift();
+      v.trail.push({x:v.x,y:v.y}); if(v.trail.length>60)v.trail.shift();
     });
     return allDone;
   }
@@ -457,13 +457,29 @@ if (typeof module!=='undefined' && module.exports) module.exports=ENGINE;
     ctx.fillStyle='#0d1c3e'; ctx.fillRect(0,0,E.W,E.H);
     if(mode===0) ctx.drawImage(zoneCv,0,0);
 
-    // rutas (trazado tenue)
-    routes.forEach(r=>{
+    // rutas: la de cada furgoneta activa, resaltada; las terminadas quedan tenues
+    routes.forEach((r,ri)=>{
+      const v=vans[ri], activa=v&&!v.done&&v.delay<=0;
       ctx.beginPath();
       r.pts.forEach((p,i)=> i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
-      if(r.kind==='transfer'){ ctx.strokeStyle=COL.rojo+'99'; ctx.setLineDash([7,6]); ctx.lineWidth=1.8; }
-      else{ ctx.strokeStyle='#4a6096'+(mode===0?'55':'70'); ctx.setLineDash(mode===0?[3,4]:[]); ctx.lineWidth=1.2; }
+      if(r.kind==='transfer'){
+        ctx.strokeStyle=activa?COL.rojo:COL.rojo+'44';
+        ctx.setLineDash([7,6]); ctx.lineWidth=activa?2.2:1.4;
+      } else {
+        ctx.strokeStyle=activa?'#a8c0ee':'#4a609655';
+        ctx.setLineDash(mode===0?[5,4]:[]);
+        ctx.lineWidth=activa?2:1;
+      }
       ctx.stroke(); ctx.setLineDash([]);
+      // marca de parada pendiente sobre la ruta activa
+      if(activa){
+        r.pts.forEach(p=>{
+          if(p.kind==='stop'&&p.order&&!p.order.delivered){
+            ctx.beginPath(); ctx.arc(p.x,p.y,9,0,7);
+            ctx.strokeStyle='#a8c0ee88'; ctx.lineWidth=1; ctx.stroke();
+          }
+        });
+      }
     });
 
     // talleres
