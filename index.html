@@ -339,8 +339,8 @@ if (typeof module!=='undefined' && module.exports) module.exports=ENGINE;
   const NOMBRES=['Rutas fijas','Dinámicas sin zonas','Dinámicas + multi-almacén'];
 
   let daySeed=20260703, ws, circuits, orders, mode=0, routes=[], vans=[], pulses=[];
-  let playing=true, speedMult=2, phase='run', phaseT=0, results=[null,null,null];
-  const SPEEDS=[1,2,4]; let spIdx=1;
+  let playing=true, speedMult=1, phase='run', phaseT=0, results=[null,null,null];
+  const SPEEDS=[1,2,4]; let spIdx=0;
 
   // tinte de zonas (Voronoi por delegación) precalculado
   const zoneCv=document.createElement('canvas'); zoneCv.width=E.W; zoneCv.height=E.H;
@@ -402,7 +402,7 @@ if (typeof module!=='undefined' && module.exports) module.exports=ENGINE;
   }
 
   function stepVans(dt){
-    const pxs=115*speedMult;
+    const pxs=55*speedMult;
     let allDone=true;
     vans.forEach(v=>{
       if(v.done) return;
@@ -417,15 +417,39 @@ if (typeof module!=='undefined' && module.exports) module.exports=ENGINE;
       if(v.t>=1){
         v.t=0; v.seg++;
         const p=pts[v.seg];
-        if(p.kind==='stop'&&p.order){ p.order.delivered=true; pulses.push({x:p.x,y:p.y,r:4,max:16,col:COL.entregado}); }
+        if(p.kind==='stop'&&p.order){ p.order.delivered=true; pulses.push({x:p.x,y:p.y,r:4,max:16,col:COL.entregado}); v.wait=0.3/speedMult; }
         if(p.kind==='reload'){ pulses.push({x:p.x,y:p.y,r:6,max:34,col:COL.amarillo}); v.wait=0.55/speedMult; }
         if(v.seg>=pts.length-1) v.done=true;
       }
       v.x=a.x+(b.x-a.x)*Math.min(1,v.t);
       v.y=a.y+(b.y-a.y)*Math.min(1,v.t);
+      if(E.dist(a,b)>2) v.ang=Math.atan2(b.y-a.y,b.x-a.x);
       v.trail.push({x:v.x,y:v.y}); if(v.trail.length>26)v.trail.shift();
     });
     return allDone;
+  }
+
+  function drawVan(x,y,ang,col){
+    ctx.save(); ctx.translate(x,y); ctx.rotate(ang);
+    if(Math.abs(ang)>Math.PI/2) ctx.scale(1,-1); // que las ruedas queden abajo al ir hacia la izquierda
+    // caja trasera
+    ctx.fillStyle=col; ctx.strokeStyle=COL.azul; ctx.lineWidth=1.4;
+    ctx.beginPath();
+    ctx.moveTo(-10,-6); ctx.lineTo(4,-6); ctx.lineTo(4,5); ctx.lineTo(-10,5); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    // cabina
+    ctx.beginPath();
+    ctx.moveTo(4,-3); ctx.lineTo(8,-3); ctx.lineTo(11,1); ctx.lineTo(11,5); ctx.lineTo(4,5); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    // ventanilla
+    ctx.fillStyle='#0a1630';
+    ctx.beginPath(); ctx.moveTo(5,-2); ctx.lineTo(7.5,-2); ctx.lineTo(9.5,1); ctx.lineTo(5,1); ctx.closePath(); ctx.fill();
+    // ruedas
+    ctx.beginPath(); ctx.arc(-6,5.5,2.4,0,7); ctx.arc(7,5.5,2.4,0,7); ctx.fill();
+    ctx.fillStyle='#8ea0c4';
+    ctx.beginPath(); ctx.arc(-6,5.5,1,0,7); ctx.fill();
+    ctx.beginPath(); ctx.arc(7,5.5,1,0,7); ctx.fill();
+    ctx.restore();
   }
 
   function draw(){
@@ -489,9 +513,7 @@ if (typeof module!=='undefined' && module.exports) module.exports=ENGINE;
         ctx.beginPath(); ctx.arc(t.x,t.y,1.6,0,7);
         ctx.fillStyle=col+Math.floor(i/v.trail.length*90+10).toString(16).padStart(2,'0'); ctx.fill();
       });
-      ctx.beginPath(); ctx.arc(v.x,v.y,5.5,0,7);
-      ctx.fillStyle=col; ctx.fill();
-      ctx.strokeStyle=COL.azul; ctx.lineWidth=2; ctx.stroke();
+      drawVan(v.x,v.y,v.ang||0,col);
     });
 
     // rótulo modo
