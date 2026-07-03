@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reynasa — Optimización de rutas: fijas vs dinámicas vs multi-almacén</title>
+<style>
+  :root{
+    --azul:#16336F; --amarillo:#F5B400; --rojo:#EC1C2D;
+    --bg:#0a1630; --panel:#101f42; --border:#24396e; --texto:#dfe7f7; --gris:#8ea0c4;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{background:var(--bg); color:var(--texto); font-family:Arial, Helvetica, sans-serif; padding:18px 22px;}
+  .wrap{max-width:1040px; margin:0 auto;}
+  header{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:4px;}
+  header h1{font-size:21px; letter-spacing:.3px;}
+  header h1 .marca{color:var(--amarillo);}
+  header .conf{font-size:10px; color:var(--rojo); border:1px solid var(--rojo); padding:2px 7px; border-radius:3px; letter-spacing:1px;}
+  .sub{color:var(--gris); font-size:13px; margin-bottom:12px;}
+  .cards{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:10px;}
+  .card{background:var(--panel); border:2px solid var(--border); border-radius:9px; padding:10px 13px; cursor:pointer; transition:border-color .25s, transform .15s;}
+  .card:hover{transform:translateY(-1px);}
+  .card.activa{border-color:var(--amarillo); box-shadow:0 0 14px rgba(245,180,0,.25);}
+  .card h3{font-size:13px; margin-bottom:6px; display:flex; align-items:center; gap:7px;}
+  .card h3 .dot{width:9px;height:9px;border-radius:50%;display:inline-block;}
+  .card .stats{display:flex; gap:14px; font-size:12px; color:var(--gris);}
+  .card .stats b{display:block; font-size:16px; color:var(--texto); font-weight:bold;}
+  .card .coste b{color:var(--amarillo);}
+  .card .delta{font-size:11px; margin-top:4px; color:#7ee0a0; min-height:13px;}
+  .mapbox{position:relative; background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden;}
+  canvas{display:block; width:100%; height:auto;}
+  .caption{position:absolute; left:0; right:0; bottom:0; background:rgba(10,22,48,.88); padding:8px 14px; font-size:12.5px; color:var(--texto); border-top:1px solid var(--border); min-height:38px;}
+  .caption b{color:var(--amarillo);}
+  .controls{display:flex; gap:8px; align-items:center; margin:10px 0 8px; flex-wrap:wrap;}
+  button{background:var(--azul); border:1px solid var(--border); color:#fff; padding:7px 14px; border-radius:6px; cursor:pointer; font-size:13px; font-family:inherit;}
+  button:hover{background:#1d4290;}
+  button.amarillo{background:var(--amarillo); color:#122; border:none; font-weight:bold;}
+  .legend{display:flex; gap:16px; flex-wrap:wrap; font-size:11.5px; color:var(--gris); margin:8px 0 10px;}
+  .legend span{display:flex; align-items:center; gap:5px;}
+  .sw{width:11px; height:11px; border-radius:50%; display:inline-block;}
+  .sw.sq{border-radius:2px;}
+  .foot{font-size:11px; color:var(--gris); line-height:1.5; border-top:1px solid var(--border); padding-top:9px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="marca">REYNASA</span> · Optimización del reparto</h1>
+    <span class="conf">CONFIDENCIAL — PROYECTO MASINA</span>
+  </header>
+  <div class="sub">Mismo día, <b>los mismos pedidos</b>, tres formas de servirlos: rutas fijas por zona · rutas dinámicas sin zonas · dinámicas con multi-almacén. Los pedidos cambian en cada nuevo reparto.</div>
+
+  <div class="cards">
+    <div class="card" id="card0" onclick="jumpMode(0)">
+      <h3><span class="dot" style="background:var(--gris)"></span>1 · Rutas fijas por zona (hoy)</h3>
+      <div class="stats">
+        <span>Furgonetas<b id="v0">—</b></span><span>km/reparto<b id="k0">—</b></span>
+        <span class="coste">Coste anual est.<b id="c0">—</b></span>
+      </div><div class="delta" id="d0"></div>
+    </div>
+    <div class="card" id="card1" onclick="jumpMode(1)">
+      <h3><span class="dot" style="background:var(--amarillo)"></span>2 · Dinámicas, sin zonas</h3>
+      <div class="stats">
+        <span>Furgonetas<b id="v1">—</b></span><span>km/reparto<b id="k1">—</b></span>
+        <span class="coste">Coste anual est.<b id="c1">—</b></span>
+      </div><div class="delta" id="d1"></div>
+    </div>
+    <div class="card" id="card2" onclick="jumpMode(2)">
+      <h3><span class="dot" style="background:#7ee0a0"></span>3 · Dinámicas + multi-almacén</h3>
+      <div class="stats">
+        <span>Furgonetas<b id="v2">—</b></span><span>km/reparto<b id="k2">—</b></span>
+        <span class="coste">Coste anual est.<b id="c2">—</b></span>
+      </div><div class="delta" id="d2"></div>
+    </div>
+  </div>
+
+  <div class="mapbox">
+    <canvas id="cv" width="1000" height="620"></canvas>
+    <div class="caption" id="caption"></div>
+  </div>
+
+  <div class="controls">
+    <button id="btnPlay" onclick="togglePlay()">⏸ Pausa</button>
+    <button onclick="cycleSpeed()" id="btnSpeed">Velocidad ×2</button>
+    <button class="amarillo" onclick="newDay()">🔄 Nuevos pedidos</button>
+  </div>
+
+  <div class="legend">
+    <span><span class="sw sq" style="background:var(--amarillo); border:2px solid #fff;"></span>Delegación / almacén</span>
+    <span><span class="sw" style="background:#5a6a8a"></span>Taller sin pedido</span>
+    <span><span class="sw" style="background:var(--amarillo)"></span>Pedido</span>
+    <span><span class="sw" style="background:linear-gradient(90deg,var(--amarillo) 50%,var(--rojo) 50%)"></span>Pedido multi-origen (referencias en 2 almacenes)</span>
+    <span><span class="sw" style="background:#7ee0a0"></span>Entregado</span>
+    <span><span class="sw" style="background:#fff"></span>Furgoneta</span>
+    <span><span class="sw" style="background:var(--rojo)"></span>Traspaso entre almacenes (furgoneta extra)</span>
+    <span>◎ Recarga en delegación (solo modo 3)</span>
+  </div>
+
+  <div class="foot">
+    <b>Red real Reynasa:</b> 16 delegaciones + almacén central · 67 tramos (R001–R017) · ~799 salidas/día · 2.644 talleres servidos · entrega media ~55 min (70% &lt;60 min) · base de reparto ~6,0 M€/año (propio + Flax).
+    Simulación <b>ilustrativa</b> con 3 delegaciones de ejemplo (Alcobendas, Alcalá de Henares, Móstoles) y talleres sintéticos — sin datos personales [POL-MMNSEG-001-1.0].
+    El coste anual se extrapola del ratio km/furgonetas frente al escenario de rutas fijas; a validar con piloto. Proyecto JD / Plan logístico 2030 — Consejo 15-jul.
+  </div>
+</div>
+
+<script>
+/*ENGINE-START*/
+const ENGINE = (function(){
+  const W=1000, H=620, CAP=8, SCALE=0.06;
+  const DEPOTS=[
+    {id:0,name:'Alcobendas',x:610,y:120},
+    {id:1,name:'Alcalá de Henares',x:810,y:310},
+    {id:2,name:'Móstoles',x:225,y:470}
+  ];
+  function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+  const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+  const angle=(c,p)=>Math.atan2(p.y-c.y,p.x-c.x);
+  const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+  function pathKm(pts){let s=0;for(let i=1;i<pts.length;i++)s+=dist(pts[i-1],pts[i]);return s*SCALE;}
+  const depPt=(d,kind)=>({x:DEPOTS[d].x,y:DEPOTS[d].y,kind:kind||'depot',depot:d});
+
+  function genWorkshops(seed){
+    const rnd=mulberry32(seed), ws=[];
+    for(let d=0;d<3;d++){
+      for(let i=0;i<34;i++){
+        const a=rnd()*Math.PI*2, r=28+rnd()*155;
+        ws.push({x:clamp(DEPOTS[d].x+Math.cos(a)*r,28,972), y:clamp(DEPOTS[d].y+Math.sin(a)*r*0.82,55,560)});
+      }
+    }
+    for(let i=0;i<46;i++){
+      const p=DEPOTS[Math.floor(rnd()*3)], q=DEPOTS[Math.floor(rnd()*3)], t=rnd();
+      ws.push({x:clamp(p.x+(q.x-p.x)*t+(rnd()-0.5)*170,28,972), y:clamp(p.y+(q.y-p.y)*t+(rnd()-0.5)*170,55,560)});
+    }
+    ws.forEach((w,i)=>{
+      w.id=i;
+      const ds=DEPOTS.map(d=>dist(w,d));
+      const ord=[0,1,2].sort((p,q)=>ds[p]-ds[q]);
+      w.nearest=ord[0];
+      // zona administrativa: en la frontera, a veces el taller pertenece a la zona "equivocada"
+      w.zone=(ds[ord[1]]<ds[ord[0]]*1.35 && rnd()<0.45)?ord[1]:ord[0];
+    });
+    return ws;
+  }
+
+  function genOrders(ws,seed){
+    const rnd=mulberry32(seed*7919+13);
+    const idx=[...ws.keys()];
+    for(let i=idx.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[idx[i],idx[j]]=[idx[j],idx[i]];}
+    const n=26+Math.floor(rnd()*9);
+    const orders=idx.slice(0,n).map(i=>({ws:ws[i], multi:null, delivered:false}));
+    orders.forEach(o=>{ if(rnd()<0.11) o.multi=(o.ws.zone+1+Math.floor(rnd()*2))%3; });
+    let nm=orders.filter(o=>o.multi!==null).length;
+    for(let i=0;i<orders.length && nm<2;i++){
+      if(orders[i].multi===null){orders[i].multi=(orders[i].ws.zone+1)%3; nm++;}
+    }
+    return orders;
+  }
+
+  // ---- MODO 1: rutas fijas por zona ----
+  function buildFixedCircuits(ws){
+    const circuits=[];
+    for(let d=0;d<3;d++){
+      const zone=ws.filter(w=>w.zone===d).sort((a,b)=>angle(DEPOTS[d],a)-angle(DEPOTS[d],b));
+      const per=Math.ceil(zone.length/3)||1;
+      for(let s=0;s<3;s++){
+        const sector=zone.slice(s*per,(s+1)*per);
+        if(sector.length) circuits.push({depot:d, sector});
+      }
+    }
+    return circuits;
+  }
+  function buildFixed(circuits,orders){
+    const byWs=new Map(orders.map(o=>[o.ws.id,o]));
+    const routes=[];
+    circuits.forEach(c=>{
+      const step=Math.max(1,Math.floor(c.sector.length/7));
+      const pts=[depPt(c.depot)]; const stops=[];
+      c.sector.forEach((w,i)=>{
+        const o=byWs.get(w.id);
+        if(o){pts.push({x:w.x,y:w.y,kind:'stop',order:o}); stops.push(o);}
+        else if(i%step===0){pts.push({x:w.x,y:w.y,kind:'via'});}
+      });
+      pts.push(depPt(c.depot,'end'));
+      routes.push({depot:c.depot, pts, stops, kind:'fixed', km:pathKm(pts)});
+    });
+    addTransfers(routes,orders);
+    return routes;
+  }
+
+  // traspaso entre almacenes para pedidos multi-origen (modos 1 y 2)
+  function addTransfers(routes,orders){
+    const pairs=new Set();
+    orders.forEach(o=>{ if(o.multi!==null && o.multi!==o.ws.zone) pairs.add(o.multi+'>'+o.ws.zone); });
+    pairs.forEach(k=>{
+      const [f,t]=k.split('>').map(Number);
+      const pts=[depPt(f),{...depPt(t),kind:'via'},depPt(f,'end')];
+      routes.push({depot:f, pts, stops:[], kind:'transfer', km:pathKm(pts)});
+    });
+  }
+
+  // ---- MODO 2: dinámico sin zonas ----
+  function orderNN(d,stops){
+    const rem=[...stops], seq=[]; let cur=DEPOTS[d];
+    while(rem.length){
+      let bi=0,bd=Infinity;
+      rem.forEach((o,i)=>{const dd=dist(cur,o.ws); if(dd<bd){bd=dd;bi=i;}});
+      const o=rem.splice(bi,1)[0]; seq.push(o); cur=o.ws;
+    }
+    return seq;
+  }
+  function dynAssign(orders){
+    const groups=[[],[],[]];
+    orders.forEach(o=>groups[o.ws.nearest].push(o));
+    const routes=[];
+    for(let d=0;d<3;d++){
+      let rem=[...groups[d]];
+      while(rem.length){
+        const chunk=[]; let cur=DEPOTS[d];
+        while(chunk.length<CAP && rem.length){
+          let bi=0,bd=Infinity;
+          rem.forEach((o,i)=>{const dd=dist(cur,o.ws); if(dd<bd){bd=dd;bi=i;}});
+          const o=rem.splice(bi,1)[0]; chunk.push(o); cur=o.ws;
+        }
+        routes.push({depot:d, stops:chunk});
+      }
+    }
+    return routes;
+  }
+  function centroid(stops){
+    const n=stops.length||1;
+    return {x:stops.reduce((s,o)=>s+o.ws.x,0)/n, y:stops.reduce((s,o)=>s+o.ws.y,0)/n};
+  }
+  function mergeSmall(routes){
+    let merged=true;
+    while(merged){
+      merged=false;
+      outer:
+      for(let i=0;i<routes.length;i++)for(let j=i+1;j<routes.length;j++){
+        const a=routes[i], b=routes[j];
+        if(a.stops.length+b.stops.length<=CAP && (a.stops.length<=4||b.stops.length<=4)
+           && dist(centroid(a.stops),centroid(b.stops))<300){
+          const all=[...a.stops,...b.stops];
+          const cen=centroid(all);
+          let bd=0,bb=Infinity;
+          for(let d=0;d<3;d++){const dd=dist(cen,DEPOTS[d]); if(dd<bb){bb=dd;bd=d;}}
+          routes.splice(j,1); routes.splice(i,1);
+          routes.push({depot:bd, stops:orderNN(bd,all)});
+          merged=true; break outer;
+        }
+      }
+    }
+    return routes;
+  }
+  function routePts(r){
+    const pts=[depPt(r.depot)];
+    r.stops.forEach(o=>pts.push({x:o.ws.x,y:o.ws.y,kind:'stop',order:o}));
+    pts.push(depPt(r.depot,'end'));
+    return pts;
+  }
+  function buildDynamic(orders){
+    const routes=mergeSmall(dynAssign(orders));
+    routes.forEach(r=>{ r.pts=routePts(r); r.kind='dyn'; r.km=pathKm(r.pts); });
+    addTransfers(routes,orders);
+    return routes;
+  }
+
+  // ---- MODO 3: dinámico + multi-almacén ----
+  function buildMulti(orders){
+    let routes=mergeSmall(dynAssign(orders));
+    // Caso B — pedido multi-origen: la furgoneta pasa por el segundo almacén antes de entregar
+    routes.forEach(r=>{
+      const pts=[depPt(r.depot)];
+      const visited=new Set([r.depot]);
+      r.stops.forEach(o=>{
+        if(o.multi!==null && o.multi!==r.depot && !visited.has(o.multi)){
+          pts.push({...depPt(o.multi),kind:'reload'}); visited.add(o.multi);
+        }
+        pts.push({x:o.ws.x,y:o.ws.y,kind:'stop',order:o});
+      });
+      pts.push(depPt(r.depot,'end'));
+      r.pts=pts; r.kind='multi';
+    });
+    // Caso A — recarga en delegación cercana: encadenar rutas en vez de sacar otra furgoneta
+    for(let i=0;i<routes.length;i++){
+      for(let j=0;j<routes.length;j++){
+        if(i===j) continue;
+        const a=routes[i], b=routes[j];
+        if(!a||!b||a.consumed||b.consumed||a.reloaded||a.depot===b.depot) continue;
+        if(b.stops.length<=4 && a.stops.length+b.stops.length<=CAP+4){
+          const last=a.stops.length?a.stops[a.stops.length-1].ws:DEPOTS[a.depot];
+          if(dist(last,DEPOTS[b.depot])<210){
+            const pts=a.pts.slice(0,-1); // quitar retorno
+            pts.push({...depPt(b.depot),kind:'reload'});
+            orderNN(b.depot,b.stops).forEach(o=>{
+              if(o.multi!==null && o.multi!==b.depot && o.multi!==a.depot){
+                pts.push({...depPt(o.multi),kind:'reload'});
+              }
+              pts.push({x:o.ws.x,y:o.ws.y,kind:'stop',order:o});
+            });
+            pts.push(depPt(b.depot,'end'));
+            a.pts=pts; a.stops=[...a.stops,...b.stops]; a.reloaded=true; b.consumed=true;
+          }
+        }
+      }
+    }
+    routes=routes.filter(r=>!r.consumed);
+    routes.forEach(r=>{ r.km=pathKm(r.pts); });
+    return routes;
+  }
+
+  function stats(routes){
+    const vans=routes.length;
+    const km=routes.reduce((s,r)=>s+r.km,0);
+    const deliveries=routes.reduce((s,r)=>s+r.stops.length,0);
+    return {vans, km, deliveries};
+  }
+  function build(mode, ws, circuits, orders){
+    orders.forEach(o=>{o.delivered=false;});
+    if(mode===0) return buildFixed(circuits,orders);
+    if(mode===1) return buildDynamic(orders);
+    return buildMulti(orders);
+  }
+  return {W,H,CAP,SCALE,DEPOTS,genWorkshops,genOrders,buildFixedCircuits,build,stats,dist};
+})();
+if (typeof module!=='undefined' && module.exports) module.exports=ENGINE;
+/*ENGINE-END*/
+</script>
+
+<script>
+(function(){
+  const E=ENGINE, cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+  const COL={azul:'#16336F', amarillo:'#F5B400', rojo:'#EC1C2D', gris:'#5a6a8a',
+             entregado:'#7ee0a0', blanco:'#ffffff', zona:['#3b6fd4','#F5B400','#EC1C2D']};
+  const CAPTIONS=[
+    '<b>Rutas fijas (hoy):</b> cada furgoneta recorre su tramo predefinido dentro de su zona, haya los pedidos que haya — incluso talleres frontera que otra delegación tiene más cerca. Los pedidos <b>multi-origen</b> exigen un traspaso previo entre almacenes (furgoneta extra, línea roja).',
+    '<b>Dinámicas, sin zonas:</b> el optimizador asigna cada pedido a la delegación que menos km añade y recalcula la secuencia con los pedidos reales del día. Menos furgonetas y menos km — pero los multi-origen aún requieren traspaso entre almacenes.',
+    '<b>Dinámicas + multi-almacén:</b> además, una furgoneta puede <b>recargar en otra delegación</b> si le pilla de camino (◎ pulso) en vez de que salga otra furgoneta, y recoge los pedidos multi-origen en el segundo almacén sin traspaso previo.'
+  ];
+  const NOMBRES=['Rutas fijas','Dinámicas sin zonas','Dinámicas + multi-almacén'];
+
+  let daySeed=20260703, ws, circuits, orders, mode=0, routes=[], vans=[], pulses=[];
+  let playing=true, speedMult=2, phase='run', phaseT=0, results=[null,null,null];
+  const SPEEDS=[1,2,4]; let spIdx=1;
+
+  // tinte de zonas (Voronoi por delegación) precalculado
+  const zoneCv=document.createElement('canvas'); zoneCv.width=E.W; zoneCv.height=E.H;
+  (function(){
+    const zc=zoneCv.getContext('2d'), cell=10;
+    for(let x=0;x<E.W;x+=cell)for(let y=0;y<E.H;y+=cell){
+      let bd=0,bb=Infinity;
+      for(let d=0;d<3;d++){const dd=Math.hypot(x+5-E.DEPOTS[d].x,y+5-E.DEPOTS[d].y); if(dd<bb){bb=dd;bd=d;}}
+      zc.fillStyle=COL.zona[bd]+'12'; zc.fillRect(x,y,cell,cell);
+    }
+  })();
+
+  function newDay(){
+    daySeed++;
+    orders=E.genOrders(ws,daySeed);
+    results=[null,null,null];
+    [0,1,2].forEach(m=>{['v','k','c','d'].forEach(p=>{document.getElementById(p+m).textContent = p==='d'?'':'—';});});
+    startMode(0);
+  }
+  window.newDay=newDay;
+  window.jumpMode=function(m){ startMode(m); };
+  window.togglePlay=function(){
+    playing=!playing;
+    document.getElementById('btnPlay').textContent=playing?'⏸ Pausa':'▶ Reanudar';
+  };
+  window.cycleSpeed=function(){
+    spIdx=(spIdx+1)%SPEEDS.length; speedMult=SPEEDS[spIdx];
+    document.getElementById('btnSpeed').textContent='Velocidad ×'+SPEEDS[(spIdx+1)%SPEEDS.length];
+  };
+
+  function startMode(m){
+    mode=m; phase='run'; phaseT=0; pulses=[];
+    routes=E.build(mode,ws,circuits,orders);
+    vans=routes.map((r,i)=>({r, seg:0, t:0, delay:i*0.35, done:false, wait:0,
+                             x:r.pts[0].x, y:r.pts[0].y, trail:[]}));
+    document.getElementById('caption').innerHTML=CAPTIONS[m];
+    [0,1,2].forEach(i=>document.getElementById('card'+i).classList.toggle('activa',i===m));
+  }
+
+  function recordStats(){
+    const s=E.stats(routes); results[mode]=s;
+    document.getElementById('v'+mode).textContent=s.vans;
+    document.getElementById('k'+mode).textContent=Math.round(s.km);
+    const base=results[0];
+    let coste;
+    if(mode===0||!base){ coste=6.0; }
+    else{
+      // solo ~35% del coste se considera variable con km/furgonetas (el resto es estructura)
+      const ratio=0.5*(s.km/base.km)+0.5*(s.vans/base.vans);
+      coste=Math.max(4.6,Math.min(6.0,6.0*(0.65+0.35*ratio)));
+    }
+    document.getElementById('c'+mode).textContent=coste.toFixed(1).replace('.',',')+' M€';
+    if(mode>0&&base){
+      const dk=Math.round((1-s.km/base.km)*100), dv=base.vans-s.vans, dc=Math.round((1-coste/6.0)*100);
+      document.getElementById('d'+mode).textContent='▼ '+dk+'% km · '+dv+' furgonetas menos · ≈ −'+dc+'% coste vs fijas';
+    } else {
+      document.getElementById('d0').textContent='Escenario base (situación actual)';
+    }
+  }
+
+  function stepVans(dt){
+    const pxs=115*speedMult;
+    let allDone=true;
+    vans.forEach(v=>{
+      if(v.done) return;
+      allDone=false;
+      if(v.delay>0){ v.delay-=dt; return; }
+      if(v.wait>0){ v.wait-=dt; return; }
+      const pts=v.r.pts;
+      if(v.seg>=pts.length-1){ v.done=true; return; }
+      const a=pts[v.seg], b=pts[v.seg+1];
+      const L=Math.max(1,E.dist(a,b));
+      v.t+=pxs*dt/L;
+      if(v.t>=1){
+        v.t=0; v.seg++;
+        const p=pts[v.seg];
+        if(p.kind==='stop'&&p.order){ p.order.delivered=true; pulses.push({x:p.x,y:p.y,r:4,max:16,col:COL.entregado}); }
+        if(p.kind==='reload'){ pulses.push({x:p.x,y:p.y,r:6,max:34,col:COL.amarillo}); v.wait=0.55/speedMult; }
+        if(v.seg>=pts.length-1) v.done=true;
+      }
+      v.x=a.x+(b.x-a.x)*Math.min(1,v.t);
+      v.y=a.y+(b.y-a.y)*Math.min(1,v.t);
+      v.trail.push({x:v.x,y:v.y}); if(v.trail.length>26)v.trail.shift();
+    });
+    return allDone;
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,E.W,E.H);
+    ctx.fillStyle='#0d1c3e'; ctx.fillRect(0,0,E.W,E.H);
+    if(mode===0) ctx.drawImage(zoneCv,0,0);
+
+    // rutas (trazado tenue)
+    routes.forEach(r=>{
+      ctx.beginPath();
+      r.pts.forEach((p,i)=> i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+      if(r.kind==='transfer'){ ctx.strokeStyle=COL.rojo+'99'; ctx.setLineDash([7,6]); ctx.lineWidth=1.8; }
+      else{ ctx.strokeStyle='#4a6096'+(mode===0?'55':'70'); ctx.setLineDash(mode===0?[3,4]:[]); ctx.lineWidth=1.2; }
+      ctx.stroke(); ctx.setLineDash([]);
+    });
+
+    // talleres
+    ws.forEach(w=>{
+      ctx.beginPath(); ctx.arc(w.x,w.y,3,0,7);
+      ctx.fillStyle=COL.gris; ctx.fill();
+      if(mode===0){ ctx.strokeStyle=COL.zona[w.zone]+'88'; ctx.lineWidth=1; ctx.stroke(); }
+    });
+    // pedidos
+    orders.forEach(o=>{
+      const w=o.ws;
+      if(o.delivered){
+        ctx.beginPath(); ctx.arc(w.x,w.y,4.2,0,7); ctx.fillStyle=COL.entregado; ctx.fill();
+      } else {
+        ctx.beginPath(); ctx.arc(w.x,w.y,5.2,0,7); ctx.fillStyle=COL.amarillo; ctx.fill();
+        if(o.multi!==null){
+          ctx.beginPath(); ctx.arc(w.x,w.y,5.2,-Math.PI/2,Math.PI/2); ctx.fillStyle=COL.rojo; ctx.fill();
+        }
+        ctx.beginPath(); ctx.arc(w.x,w.y,8,0,7); ctx.strokeStyle=COL.amarillo+'44'; ctx.stroke();
+      }
+    });
+
+    // delegaciones
+    E.DEPOTS.forEach(d=>{
+      ctx.fillStyle=COL.amarillo; ctx.strokeStyle='#fff'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.rect(d.x-9,d.y-9,18,18); ctx.fill(); ctx.stroke();
+      ctx.fillStyle=COL.azul; ctx.font='bold 10px Arial'; ctx.textAlign='center';
+      ctx.fillText('R',d.x,d.y+3.5);
+      ctx.fillStyle='#cdd9f2'; ctx.font='bold 11px Arial';
+      ctx.fillText(d.name,d.x,d.y+26);
+    });
+
+    // pulsos
+    for(let i=pulses.length-1;i>=0;i--){
+      const p=pulses[i]; p.r+=0.7*speedMult;
+      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7);
+      ctx.strokeStyle=p.col+Math.max(0,Math.floor((1-p.r/p.max)*200)).toString(16).padStart(2,'0');
+      ctx.lineWidth=2; ctx.stroke();
+      if(p.r>=p.max) pulses.splice(i,1);
+    }
+
+    // furgonetas
+    vans.forEach(v=>{
+      if(v.done||v.delay>0) return;
+      const col=v.r.kind==='transfer'?COL.rojo:COL.blanco;
+      v.trail.forEach((t,i)=>{
+        ctx.beginPath(); ctx.arc(t.x,t.y,1.6,0,7);
+        ctx.fillStyle=col+Math.floor(i/v.trail.length*90+10).toString(16).padStart(2,'0'); ctx.fill();
+      });
+      ctx.beginPath(); ctx.arc(v.x,v.y,5.5,0,7);
+      ctx.fillStyle=col; ctx.fill();
+      ctx.strokeStyle=COL.azul; ctx.lineWidth=2; ctx.stroke();
+    });
+
+    // rótulo modo
+    ctx.textAlign='left'; ctx.fillStyle=COL.amarillo; ctx.font='bold 15px Arial';
+    ctx.fillText('MODO '+(mode+1)+' · '+NOMBRES[mode].toUpperCase(),16,28);
+    ctx.fillStyle='#cdd9f2'; ctx.font='12px Arial';
+    const done=orders.filter(o=>o.delivered).length;
+    ctx.fillText('Entregas: '+done+'/'+orders.length+'   ·   Furgonetas en ruta: '+vans.filter(v=>!v.done).length,16,47);
+  }
+
+  let last=0;
+  function loop(ts){
+    const dt=Math.min(0.05,(ts-last)/1000); last=ts;
+    if(playing){
+      if(phase==='run'){
+        if(stepVans(dt)){ recordStats(); phase='hold'; phaseT=0; }
+      } else if(phase==='hold'){
+        phaseT+=dt;
+        const holdFor = mode===2 ? 3.0 : 1.5;
+        if(phaseT>holdFor){
+          if(mode<2) startMode(mode+1);
+          else newDay();
+        }
+      }
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  ws=E.genWorkshops(42);
+  circuits=E.buildFixedCircuits(ws);
+  orders=E.genOrders(ws,daySeed);
+  startMode(0);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
